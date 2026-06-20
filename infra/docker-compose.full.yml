@@ -1,0 +1,47 @@
+# Full stack: Mosquitto broker + backend (serves the built dashboard) + optional
+# device simulator (so it demos with no hardware). Run from repo root:
+#   docker compose -f infra/docker-compose.full.yml up --build
+# Then open http://localhost:8077
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/aclfile:/mosquitto/config/aclfile:ro
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      BROKER_HOST: mosquitto
+      BROKER_PORT: "1883"
+      PORT: "8077"
+      # AUTH_REQUIRED: "1"          # enable teacher auth in production
+      # TEACHERS: "ms.kim:secret"   # teacher accounts
+    ports:
+      - "8077:8077"
+    volumes:
+      - r4data:/app/data            # persist sqlite/roster/registry
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  # Optional: simulated boards for a no-hardware demo. Remove for real devices.
+  simulator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["python", "-m", "sim.simulate"]
+    environment:
+      BROKER_HOST: mosquitto
+      SIM_N: "15"
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+volumes:
+  r4data:

@@ -29,14 +29,22 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"[{'PASS' if ok else 'FAIL'}] {name} {detail}")
 
 
-def _post_cmd(body: dict) -> dict:
+def _post(path: str, body: dict) -> dict:
     req = urllib.request.Request(
-        f"{BASE}/api/cmd",
+        f"{BASE}{path}",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     return json.load(urllib.request.urlopen(req, timeout=5))
+
+
+def _post_cmd(body: dict) -> dict:
+    return _post("/api/cmd", body)
+
+
+def _get(path: str):
+    return json.load(urllib.request.urlopen(f"{BASE}{path}", timeout=5))
 
 
 async def main() -> int:
@@ -97,6 +105,34 @@ async def main() -> int:
             check("cmd round-trip (feedback clears help)", False, repr(e))
     else:
         check("cmd round-trip (feedback clears help)", False, "no help device to target")
+
+    # 5) P2–P9 capabilities
+    snap2 = store.snapshot()
+    check("P2 groups in snapshot", len(snap2.get("groups", [])) >= 2,
+          str([g["id"] for g in snap2.get("groups", [])]))
+    check("P3 mastery_by_q in snapshot", len(snap2.get("mastery_by_q", [])) >= 1,
+          str(snap2.get("mastery_by_q")))
+    try:
+        rep = await asyncio.to_thread(_get, "/api/report/activity?act=color-quiz")
+        check("P8 report endpoint", bool(rep.get("by_question")), str(rep)[:80])
+    except Exception as e:  # noqa
+        check("P8 report endpoint", False, repr(e))
+    try:
+        acts = await asyncio.to_thread(_get, "/api/activities")
+        check("P7 activities endpoint", len(acts) >= 2, str([a["id"] for a in acts]))
+    except Exception as e:  # noqa
+        check("P7 activities endpoint", False, repr(e))
+    try:
+        lg = await asyncio.to_thread(_post, "/api/login", {"user": "teacher", "password": "r4-demo"})
+        check("P6 login issues token", bool(lg.get("token")), "")
+    except Exception as e:  # noqa
+        check("P6 login issues token", False, repr(e))
+    try:
+        gr = await asyncio.to_thread(
+            _post_cmd, {"target": {"type": "group", "id": "A"}, "cmd": "freeze", "payload": {"freeze": True}})
+        check("P2 group command routes", gr.get("ok") and gr.get("topics"), str(gr.get("topics")))
+    except Exception as e:  # noqa
+        check("P2 group command routes", False, repr(e))
 
     srv.cancel(); sim.cancel()
     try:
