@@ -8,6 +8,9 @@ uv.lock
 frontend/node_modules/
 frontend/dist/
 
+# Runtime data (sqlite db, audit log, roster, registry, activities)
+data/
+
 # Misc
 .DS_Store
 *.log
