@@ -1,0 +1,28 @@
+:root {
+  --bg: #f7f9fc;
+  --header-bg: #1f2733;
+  --header-fg: #e8edf3;
+  --panel-bg: #ffffff;
+  --border: #d8dee8;
+  --muted: #6b7686;
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Malgun Gothic', 'Segoe UI', Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: #1f2733;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+button:disabled { cursor: default; opacity: 0.5; }

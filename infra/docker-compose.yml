@@ -1,0 +1,13 @@
+# Production-faithful broker (Mosquitto). Dev can instead use the in-process
+# amqtt broker via run_dev.py. Bring up:  docker compose -f infra/docker-compose.yml up
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # MQTT over WebSocket (optional)
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/aclfile:/mosquitto/config/aclfile:ro
+      # - ./mosquitto/passwd:/mosquitto/config/passwd:ro   # enable for per-device auth
+    restart: unless-stopped

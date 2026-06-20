@@ -1,0 +1,13 @@
+# Per-device topic ACL (used in production with allow_anonymous false + password_file).
+# Each device authenticates as username == its device id; %u expands to it.
+# Devices are confined to their own namespace — NO wildcard subscribe (prevents
+# one board from reading another child's data). See docs/README.md §6.5.
+
+pattern readwrite edu/site1/%u/#
+pattern read      edu/site1/group/+/cmd/#
+
+# Backend / dashboard service account — broad read + command publish only.
+user backend
+topic read  edu/#
+topic write edu/site1/+/cmd/#
+topic write edu/site1/group/+/cmd/#
