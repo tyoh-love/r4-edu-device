@@ -23,6 +23,13 @@ const labelText = computed(() => {
   if (d.state === 'done') return '완료 ✓'
   return meta.value.label
 })
+
+const fbText = computed(() => {
+  const fb = props.device.fb
+  if (fb === 'feedback') return '🔔 피드백'
+  if (fb === 'hint') return '💡 힌트'
+  return ''
+})
 </script>
 
 <template>
@@ -32,6 +39,7 @@ const labelText = computed(() => {
     :style="{ background: meta.color }"
     @click="$emit('select', device.id)"
   >
+    <div v-if="fbText" class="fb-badge">{{ fbText }}</div>
     <div class="seat">
       <span v-if="device.state === 'help'" class="hand">✋</span>{{ device.seat_no }}번
     </div>
@@ -42,6 +50,7 @@ const labelText = computed(() => {
 
 <style scoped>
 .tile {
+  position: relative;
   border: 2px solid rgba(0, 0, 0, 0.08);
   border-radius: 14px;
   min-height: 92px;
@@ -54,6 +63,19 @@ const labelText = computed(() => {
   text-align: center;
   color: #1f2733;
   transition: transform 0.08s ease, box-shadow 0.1s ease;
+}
+.fb-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #1e293b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 .tile:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); }
 .tile.help {

@@ -8,6 +8,7 @@ const snapshot = ref(null)
 const connected = ref(false)
 const selectedId = ref(null)
 const sortBySeat = ref(false)
+const groupView = ref(false)
 const busy = ref(false)
 
 let ws = null
@@ -76,20 +77,43 @@ const session = computed(() => snapshot.value?.session || {})
 const counts = computed(() => snapshot.value?.counts || {})
 const mastery = computed(() => snapshot.value?.mastery || { n: 0, correct: 0, rate: 0 })
 
-const sortedDevices = computed(() => {
-  const list = [...(snapshot.value?.devices || [])]
+function sortDevices(list) {
+  const arr = [...list]
   if (sortBySeat.value) {
-    list.sort((a, b) => (a.seat_no || 0) - (b.seat_no || 0))
+    arr.sort((a, b) => (a.seat_no || 0) - (b.seat_no || 0))
   } else {
-    list.sort((a, b) => {
+    arr.sort((a, b) => {
       const oa = stateMeta(a.state).order
       const ob = stateMeta(b.state).order
       if (oa !== ob) return oa - ob
       return (a.seat_no || 0) - (b.seat_no || 0)
     })
   }
-  return list
-})
+  return arr
+}
+
+const sortedDevices = computed(() => sortDevices(snapshot.value?.devices || []))
+
+const groups = computed(() => snapshot.value?.groups || [])
+
+const groupedSections = computed(() =>
+  groups.value.map((g) => ({
+    group: g,
+    devices: sortDevices((snapshot.value?.devices || []).filter((d) => d.group === g.id))
+  }))
+)
+
+const masteryByQ = computed(() => snapshot.value?.mastery_by_q || [])
+
+function masteryColor(rate) {
+  if (rate >= 0.7) return '#22c55e'
+  if (rate >= 0.4) return '#f59e0b'
+  return '#ef4444'
+}
+
+function groupRateText(g) {
+  return `정답률 ${Math.round((g.rate || 0) * 100)}% (${g.correct || 0}/${g.answered || 0})`
+}
 
 const selectedDevice = computed(() =>
   (snapshot.value?.devices || []).find((d) => d.id === selectedId.value) || null
@@ -125,9 +149,12 @@ async function postCmd(target, cmd, payload) {
   }
 }
 
-function pushActivity() { postCmd({ type: 'all' }, 'push_activity', {}) }
+function pushActivity() { postCmd({ type: 'all' }, 'push_activity', { act: 'shapes-quiz' }) }
 function freezeAll() { postCmd({ type: 'all' }, 'freeze', { freeze: true }) }
 function resumeAll() { postCmd({ type: 'all' }, 'resume', { freeze: false }) }
+
+function pushGroupActivity(id) { postCmd({ type: 'group', id }, 'push_activity', { act: 'shapes-quiz' }) }
+function freezeGroup(id) { postCmd({ type: 'group', id }, 'freeze', { freeze: true }) }
 
 function onSelect(id) { selectedId.value = id }
 
@@ -163,6 +190,9 @@ function legendMeta(s) { return STATE_META[s] }
         <span class="swatch" :style="{ background: legendMeta(s).color }"></span>
         {{ legendMeta(s).label }} {{ counts[s] || 0 }}
       </span>
+      <button class="sort-toggle" @click="groupView = !groupView">
+        {{ groupView ? '전체 보기' : '그룹 보기' }}
+      </button>
       <button class="sort-toggle" @click="sortBySeat = !sortBySeat">
         {{ sortBySeat ? '주목 순' : '좌석 순' }} 보기
       </button>
@@ -171,18 +201,66 @@ function legendMeta(s) { return STATE_META[s] }
     <!-- Main: grid + detail -->
     <main class="main">
       <section class="grid-wrap">
-        <div class="grid">
-          <DeviceTile
-            v-for="d in sortedDevices"
-            :key="d.id"
-            :device="d"
-            :selected="d.id === selectedId"
-            @select="onSelect"
-          />
+        <!-- Group view -->
+        <template v-if="groupView">
+          <div v-for="sec in groupedSections" :key="sec.group.id" class="group-section">
+            <div class="group-header">
+              <div class="group-id">{{ sec.group.id }}조</div>
+              <div class="group-meta">
+                <span class="group-counts">{{ sec.group.n || 0 }}명</span>
+                <span v-for="s in LEGEND_STATES" :key="s" class="group-count-item">
+                  <span class="swatch sm" :style="{ background: legendMeta(s).color }"></span>
+                  {{ legendMeta(s).label }} {{ (sec.group.counts && sec.group.counts[s]) || 0 }}
+                </span>
+                <span class="group-rate">{{ groupRateText(sec.group) }}</span>
+              </div>
+              <div class="group-actions">
+                <button class="gg push" :disabled="busy" @click="pushGroupActivity(sec.group.id)">활동 푸시</button>
+                <button class="gg freeze" :disabled="busy" @click="freezeGroup(sec.group.id)">전체 멈춤</button>
+              </div>
+            </div>
+            <div class="grid">
+              <DeviceTile
+                v-for="d in sec.devices"
+                :key="d.id"
+                :device="d"
+                :selected="d.id === selectedId"
+                @select="onSelect"
+              />
+            </div>
+          </div>
+          <p v-if="!groupedSections.length" class="empty-grid">
+            {{ connected ? '그룹 정보가 없습니다.' : '서버에 연결 중…' }}
+          </p>
+        </template>
+
+        <!-- Flat view -->
+        <template v-else>
+          <div class="grid">
+            <DeviceTile
+              v-for="d in sortedDevices"
+              :key="d.id"
+              :device="d"
+              :selected="d.id === selectedId"
+              @select="onSelect"
+            />
+          </div>
+          <p v-if="!sortedDevices.length" class="empty-grid">
+            {{ connected ? '기기가 없습니다.' : '서버에 연결 중…' }}
+          </p>
+        </template>
+
+        <!-- Mastery by question -->
+        <div v-if="masteryByQ.length" class="mastery-by-q">
+          <div class="mbq-title">문항별 정답률</div>
+          <div v-for="m in masteryByQ" :key="m.q" class="mbq-row">
+            <span class="mbq-label">Q{{ m.q }}</span>
+            <div class="mbq-track">
+              <div class="mbq-fill" :style="{ width: Math.round((m.rate || 0) * 100) + '%', background: masteryColor(m.rate || 0) }"></div>
+            </div>
+            <span class="mbq-val">{{ Math.round((m.rate || 0) * 100) }}% ({{ m.correct || 0 }}/{{ m.answered || 0 }})</span>
+          </div>
         </div>
-        <p v-if="!sortedDevices.length" class="empty-grid">
-          {{ connected ? '기기가 없습니다.' : '서버에 연결 중…' }}
-        </p>
       </section>
 
       <DetailPanel :device="selectedDevice" :busy="busy" @cmd="onDeviceCmd" />
@@ -242,7 +320,6 @@ function legendMeta(s) { return STATE_META[s] }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
 .swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.12); }
 .sort-toggle {
-  margin-left: auto;
   border: 1px solid var(--border);
   background: #fff;
   border-radius: 8px;
@@ -250,6 +327,7 @@ function legendMeta(s) { return STATE_META[s] }
   font-size: 13px;
   font-weight: 600;
 }
+.sort-toggle:first-of-type { margin-left: auto; }
 
 /* Main */
 .main { display: flex; gap: 14px; align-items: flex-start; flex: 1; }
@@ -260,6 +338,52 @@ function legendMeta(s) { return STATE_META[s] }
   gap: 12px;
 }
 .empty-grid { color: var(--muted); text-align: center; padding: 40px 0; }
+
+/* Group view */
+.group-section { margin-bottom: 18px; }
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 4px 10px;
+}
+.group-id { font-size: 16px; font-weight: 700; }
+.group-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.group-count-item { display: inline-flex; align-items: center; gap: 5px; }
+.swatch.sm { width: 12px; height: 12px; }
+.group-rate { font-weight: 600; color: #334155; }
+.group-actions { display: flex; gap: 8px; margin-left: auto; }
+.gg {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.gg.push { background: #dcfce7; border-color: #86efac; }
+.gg.freeze { background: #fee2e2; border-color: #fca5a5; }
+
+/* Mastery by question */
+.mastery-by-q {
+  margin-top: 16px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.mbq-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.mbq-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 13px; }
+.mbq-label { width: 32px; flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mbq-track {
+  flex: 1;
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.mbq-fill { height: 100%; border-radius: 6px; transition: width 0.2s ease; }
+.mbq-val { width: 120px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: #475569; }
 
 /* Action bar */
 .actionbar {

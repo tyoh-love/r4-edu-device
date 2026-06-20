@@ -39,6 +39,8 @@ class Board:
         self.paused = False
         self.stalled = False
         self.seq = 0
+        self.fb_until = 0.0      # transient teacher-feedback marker (P4)
+        self.fb_kind: str | None = None
         # Seed a varied initial snapshot so the grid is interesting immediately.
         if idx == 7:
             self.raw = "help"  # child raised hand
@@ -63,6 +65,7 @@ class Board:
             "since": self.since,
             "idle_ms": idle_ms,
             "seq": self.seq,
+            "fb": self.fb_kind if now < self.fb_until else None,
         }
 
     def set_state(self, raw: str) -> None:
@@ -101,27 +104,56 @@ class Board:
         return None
 
 
+def _apply_cmd(b: Board, cmd: str, payload: dict) -> None:
+    """Apply one command to one board (device-, group-, or all-targeted)."""
+    if cmd == "freeze":
+        b.paused = True
+    elif cmd == "resume":
+        b.paused = False
+        b.last_input = time.time()
+    elif cmd == "push_activity":
+        b.act = payload.get("act", "activity-2")
+        b.q = 1
+        b.paused = False
+        b.stalled = False
+        b.last_input = time.time()
+        b.set_state("working")
+    elif cmd == "pace":
+        # pacing hint (segment/timer) — accepted; affects nothing visible yet
+        pass
+    elif cmd in ("feedback", "hint"):
+        # child-facing nudge (LED/sound on real HW); mark transient for the grid
+        b.fb_until = time.time() + 3.0
+        b.fb_kind = cmd
+        # teacher acknowledged a raised hand: clear help / nudge back to working
+        if b.raw == "help":
+            b.set_state("working")
+            b.last_input = time.time()
+
+
 async def _command_listener(client: aiomqtt.Client, boards: dict[str, Board]) -> None:
-    await client.subscribe(f"edu/{C.SITE}/+/cmd/#")
+    await client.subscribe(f"edu/{C.SITE}/+/cmd/#")            # device commands
+    await client.subscribe(f"edu/{C.SITE}/group/+/cmd/#")      # group commands
     async for m in client.messages:
         parts = m.topic.value.split("/")
-        if len(parts) < 5:
+        try:
+            payload = json.loads(m.payload.decode()) if m.payload else {}
+        except (ValueError, TypeError):
+            payload = {}
+        targets: list[Board] = []
+        if len(parts) >= 6 and parts[2] == "group":
+            gid, cmd = parts[3], parts[5]
+            targets = [b for b in boards.values() if b.group == gid]
+        elif len(parts) >= 5:
+            dev_id, cmd = parts[2], parts[4]
+            b = boards.get(dev_id)
+            targets = [b] if b else []
+        else:
             continue
-        dev_id, cmd = parts[2], parts[4]
-        b = boards.get(dev_id)
-        if not b:
-            continue
-        if cmd == "freeze":
-            b.paused = True
-        elif cmd == "resume":
-            b.paused = False
-        elif cmd in ("feedback", "hint"):
-            # teacher acknowledged: clear help / nudge back to working
-            if b.raw == "help":
-                b.set_state("working")
-                b.last_input = time.time()
-        # re-publish state so the dashboard reflects the reaction immediately
-        await client.publish(C.t_state(dev_id), json.dumps(b.state_payload()), retain=True)
+        for b in targets:
+            _apply_cmd(b, cmd, payload)
+            # re-publish state so the dashboard reflects the reaction immediately
+            await client.publish(C.t_state(b.id), json.dumps(b.state_payload()), retain=True)
 
 
 async def run() -> None:

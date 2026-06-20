@@ -67,5 +67,26 @@ Returns `{ "ok": true, "topic": "edu/site1/r4-0007/cmd/feedback" }`.
 - Global action bar: **활동 푸시** (cmd `push_activity` to `all`), **전체 멈춤** (cmd `freeze` to `all`), **재개** (cmd `resume` to `all`).
 - Reference visual: `docs/assets/whos-stuck-wireframe.png`.
 
+## Phase 2–4 additions
+
+The snapshot now also carries:
+```json
+{
+  "mastery_by_q": [ {"q":1,"answered":15,"correct":11,"rate":0.73}, ... ],
+  "groups": [ {"id":"A","counts":{...},"n":8,"answered":7,"correct":5,"rate":0.71}, ... ],
+  "devices": [ { "...": "...", "fb": "feedback" } ]   // fb: "feedback"|"hint"|null (transient ~3s)
+}
+```
+
+Commands (`POST /api/cmd`) gained:
+- `target.type: "group"` with `id` = group id → publishes `edu/site1/group/<id>/cmd/<cmd>`.
+- `cmd: "push_activity"` payload `{ "act": "shapes-quiz" }` → resets targeted boards to working, q=1, new activity.
+- `cmd: "pace"` payload `{ "segment": 1, "timer": 60 }` → pacing hint (accepted).
+
+Frontend additions (Phase 2–4):
+- **Group view toggle**: section devices by `group` with per-group counts + per-group action buttons (활동 푸시 / 전체 멈춤 to that group via `target:{type:"group",id}`).
+- **Mastery-by-question**: small per-question bars from `mastery_by_q` (정답률 by 문항).
+- **Feedback badge**: when a device's `fb` is set, show a transient badge on its tile (🔔 피드백 / 💡 힌트) — confirms the teacher nudge reached the child.
+
 ## Run
 Backend dev server is started by `run_dev.py` (broker+backend+simulator). Frontend dev: `npm run dev` (Vite), proxy `/api` and `/ws` to `localhost:8000`. Production: `npm run build` → served by backend at `/`.

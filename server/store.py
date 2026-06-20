@@ -44,6 +44,7 @@ class Device:
     uptime_s: int | None = None
     help_since: float | None = None
     lwt_offline: bool = False
+    fb: str | None = None  # transient teacher-feedback marker (P4)
 
     # --- derived ---
     def online(self, now: float) -> bool:
@@ -70,6 +71,8 @@ class Store:
     def __init__(self) -> None:
         self._devices: dict[str, Device] = {}
         self._changed = asyncio.Event()
+        # per-(activity, question) answer tally for formative assessment (P3)
+        self._answer_stats: dict[tuple[str, int], dict] = {}
 
     # ---- mutations (called from the MQTT ingest loop) ----
     def _ensure(self, device_id: str) -> Device:
@@ -93,6 +96,7 @@ class Store:
         d.act = p.get("act", d.act)
         d.q = p.get("q", d.q)
         d.idle_ms = int(p.get("idle_ms", 0))
+        d.fb = p.get("fb")
         d.last_update = now
         d.lwt_offline = False
         self.bump()
@@ -114,6 +118,12 @@ class Store:
             d.act = p["act"]
         if "q" in p:
             d.q = p["q"]
+        # accumulate formative-assessment stats per (activity, question)
+        key = (p.get("act") or d.act or "?", int(p.get("q") or d.q or 0))
+        st = self._answer_stats.setdefault(key, {"answered": 0, "correct": 0})
+        st["answered"] += 1
+        if p.get("correct"):
+            st["correct"] += 1
         d.last_update = time.time()
         self.bump()
 
@@ -122,6 +132,10 @@ class Store:
         d = self._ensure(device_id)
         d.lwt_offline = raw.strip().strip('"') == "offline"
         self.bump()
+
+    def seat_group(self, device_id: str) -> tuple[int, str]:
+        d = self._devices.get(device_id)
+        return (d.seat_no, d.group) if d else (0, "?")
 
     # ---- change signalling ----
     def bump(self) -> None:
@@ -182,16 +196,43 @@ class Store:
                         else 0
                     ),
                     "online": d.online(now),
+                    "fb": d.fb,
                 }
             )
         # attention-first ordering for convenience (frontend may re-sort)
         out_devices.sort(key=lambda x: (STATE_PRIORITY[EffectiveState(x["state"])], x["seat_no"]))
         rate = round(correct / n_answered, 3) if n_answered else 0.0
+        # per-group breakdown (P2 group view / P3 group mastery)
+        groups: dict[str, dict] = {}
+        for dv in out_devices:
+            g = groups.setdefault(
+                dv["group"],
+                {"id": dv["group"], "counts": {s.value: 0 for s in EffectiveState},
+                 "n": 0, "answered": 0, "correct": 0},
+            )
+            g["counts"][dv["state"]] += 1
+            g["n"] += 1
+            ans = dv["last_answer"]
+            if ans is not None and dv["act"] == activity:
+                g["answered"] += 1
+                if ans.get("correct"):
+                    g["correct"] += 1
+        for g in groups.values():
+            g["rate"] = round(g["correct"] / g["answered"], 3) if g["answered"] else 0.0
+        # per-question mastery for the current activity (P3)
+        mastery_by_q = [
+            {"q": q, "answered": st["answered"], "correct": st["correct"],
+             "rate": round(st["correct"] / st["answered"], 3) if st["answered"] else 0.0}
+            for (a, q), st in sorted(self._answer_stats.items())
+            if a == activity
+        ]
         return {
             "type": "snapshot",
             "ts": now,
             "session": {"sid": "s1", "activity": activity, "q": cur_q},
             "counts": counts,
             "mastery": {"n": n_answered, "correct": correct, "rate": rate},
+            "mastery_by_q": mastery_by_q,
+            "groups": [groups[k] for k in sorted(groups)],
             "devices": out_devices,
         }
